@@ -1,0 +1,170 @@
+#' Fitting generalized partial linear spatially varying coefficient regression
+#' models
+#'
+#' \code{gplsvcm_fit} fits the generalized partial linear spatially varying
+#' coefficient models.
+#'
+#' @importFrom MGLM kr
+#' @importFrom BPST basis
+#' @importFrom MASS glm.nb
+#' @importFrom Matrix bdiag
+#'
+#' @param Y The response variable,a \code{n} by one matrix where \code{n} is the
+#'   number of observations.
+#' @param X The design matrix of \code{n} by \code{np} where \code{np} is the
+#'   number of covariates (including intercept if intercept exists). Each row is a vector of the covariates for an
+#'   observation.
+#' @param ind_l The vector of the indexes which indicate the columns of linear
+#'   covariates in \code{X}.
+#' @param ind_nl The vector of the indexes which indicate the columns of
+#'   nonlinear covariates in \code{X}.
+#' @param U A \code{n} by two matrix where each row is the coordinates of an
+#'   observation.
+#' @param V A \code{N} by two matrix of vertices of a triangulation, where
+#'   \code{N} is the number of vertices and each row is the coordinates for a
+#'   vertex.
+#' @param Tr A \code{n_Tr} by three triangulation matrix, where \code{n_Tr} is
+#'   the number of triangles in the triangulation and each row is the indices of
+#'   vertices in \code{V}.
+#' @param d The degree of piecewise polynomials -- default is 2.
+#' @param r The smoothness parameter and \code{r} \eqn{<} \code{d} -- default is
+#'   1.
+#' @param lambda The vector of the candidates of penalty parameter -- default is
+#'   grid points of 10 to the power of a sequence from -6 to 6 by 0.5.
+#' @param family The family object which specifies the distribution and link to
+#'   use (see \code{\link{glm}} and \code{\link{family}}).
+#' @param off The offset -- default is 0.
+#' @param r_theta The vector of the upper and lower bound of an interval to
+#'   search for an additional parameter \code{theta} for negative binomial
+#'   scenario -- default is c(2,8).
+#' @param eps The error tolerance for the Pearson estimate of the scale
+#'   parameter, which is as close  to 1, when estimating an additional parameter
+#'   \code{theta} for negative binomial scenario -- default is 0.01.
+#' @return The function returns a list of fitted object information from S3
+#'   class "gplsvcm" with the following items: \item{alpha_hat}{The estimated
+#'   coefficients for the nonlinear component of the model.} \item{beta_hat}{The
+#'   estimated coefficients for the linear component of the model.}
+#'   \item{Qtheta}{The estimated spline coefficients.} \item{lambda_sel}{The
+#'   selected penalty parameter through generalized cross-validation (GCV) for
+#'   bivariate penalized spline over trianulation estimation.} \item{gcv}{The
+#'   GCV statistics for \code{lambda_sel}.} \item{df}{The effective degree of
+#'   freedom for the model.} \item{theta}{The estimated additional parameter
+#'   theta for negative binomial scenario.} \item{Y}{The matrix of responses, of
+#'   dimension \code{n} by one where \code{n} is number of observations inside
+#'   the triangulation.} \item{X_nl}{The matrix of nonlinear covariates for
+#'   observations inside the triangulation, of dimension \code{n} by \code{np_l}
+#'   where \code{n} is number of observations inside the triangulation and
+#'   \code{np_l} is the number of linear covarites.} \item{X_l}{The matrix of
+#'   linear covariates for observations inside the triangulation, \code{n} by
+#'   \code{np_l} where \code{n} is number of observations inside the
+#'   triangulation and \code{np_nl} is the number of nonlinear covarites.}
+#'   \item{U}{The matrix of coordinates for observations inside the
+#'   triangulation, of dimension \code{n} by 2 where \code{n} is number of
+#'   observations inside the triangulation and each row is the coordinates of an
+#'   observation.} \item{ind_l}{The vector of the indexes which indicate the
+#'   columns of linear covariates in \code{X}.} \item{ind_nl}{The vector of the
+#'   indexes which indicate the columns of nonlinear covariates in \code{X}.}
+#'   \item{family}{The family object.} \item{V}{The matrix of vertices of the
+#'   triangulation, with dimension \code{N} by two where \code{N} is the number
+#'   of vertices of the triangulation and each row is the coordinates for a
+#'   vertex} \item{Tr}{The triangulation matrix of of the triangulation, with
+#'   dimention \code{n_Tr} by three, where \code{n_Tr} is the number of
+#'   triangles in the triangulation and each row is the indices of vertices in
+#'   \code{V}.} \item{d}{The degree of piecewise polynomials.} \item{r}{The
+#'   smoothness parameter.} \item{B}{The spline basis function of dimension
+#'   \code{n} by \code{n_Tr}*\code{{(d+1)(d+2)/2}}, where \code{n} and
+#'   \code{n_Tr} are the number of observations and the number of triangles
+#'   inside the given triangulation respectively, \code{d} is the degree of the
+#'   spline. If some points do not fall in the triangulation, the generation of
+#'   the spline basis will not take those points into consideration.}
+#'   \item{Q2}{The Q2 matrix after QR decomposition of the smoothness matrix
+#'   \code{H}.} \item{K}{The thin-plate energy function.} \item{ind_inside}{A
+#'   vector contains the indexes of all the points which are inside the
+#'   triangulation.} \item{tria_all}{The area of each triangle within the given
+#'   triangulation.} \item{lambda}{The vector of the candidates of penalty
+#'   parameter used in fitting the model.} \item{r_theta}{The vector of the
+#'   upper and lower bound of an interval to search for an additional parameter
+#'   theta used in negative binomial scenario.} \item{off}{The offset.}
+#'   \item{eps}{The error tolerance used for the Pearson estimate of the scale
+#'   parameter for negative binomial scenario.}
+#'
+#' @details The \code{gplsvcm_fit} function is for fitting the Generalized
+#'   Partial Linear Spatially Varying Coefficient Models (GPLSVCM) when the
+#'   model structure is specified before analysis, that is, the parameters
+#'   \code{ind_l} and \code{ind_nl} are specified before fitting the model.The
+#'   construction of the polynomial spline functions is via
+#'   \code{\link[BPST]{basis}}. If the true model structure is not known before
+#'   model fitting, we recommend using another function \code{gplsvcm_fitwMIDF}
+#'   in this package. Note, if \code{ind_l} is specified as a null vector,
+#'   \code{gplsvcm_fit} will fit a \code{glm} model, and if \code{ind_nl} is
+#'   specified as a null vector,\code{gplsvcm_fit} will fit a \code{gsvcm}
+#'   model.
+#'
+#' @examples
+#' # Population:
+#' family=poisson()
+#' ngrid = 0.02
+#'
+#' # Data generation:
+#' pop = Datagenerator(family, ngrid)
+#' N=nrow(pop)
+#'
+#' # Triangulations and setup:
+#' Tr = Tr0; V = V0; n = 1000; d = 2; r = 1;
+#'
+#' # set up for smoothing parameters in the penalty term:
+#' lambda_start=0.0001; lambda_end=10; nlambda=10
+#' lambda=exp(seq(log(lambda_start),log(lambda_end),length.out=nlambda))
+#'
+#' # Generate Sample:
+#' ind_s=sample(N,n,replace=FALSE)
+#' data=as.matrix(pop[ind_s,])
+#' Y=data[,1]; alpha=data[,c(2:3)]; beta=data[,c(4:5)];
+#' X=cbind(rep(1,length(Y)),data[,c(6:9)]); ind_l=c(1,4,5); ind_nl=c(2,3);
+#' U=data[,c(10:11)];
+#'
+#' # Fit the model:
+#' mfit = gplsvcm_fit(Y, X,ind_l,ind_nl,U, V, Tr, d , r , lambda,family,off = 0,
+#' r_theta = c(2, 8), eps= 0.01)
+#'
+#' @export
+
+
+gplsvcm_fit =function(Y, X,ind_l,ind_nl,U, V, Tr, d = 2, r = 1,lambda = 10^seq(-6, 6, by = 0.5),family, off = 0,r_theta = c(2, 8), eps= 0.01)
+{
+  if(!is.matrix(Y)){
+    warning("The response variable, Y, is transformed to a matrix.")
+    Y= as.matrix(Y)
+  }
+  if(!is.matrix(X)){
+    warning("The explanatory variable, X, is transformed to a matrix.")
+    X = as.matrix(X)
+  }
+  if(!is.matrix(U)){
+    warning("The coordinates, U, is transformed to a matrix.")
+    U = as.matrix(U)
+  }
+  this_call = match.call()
+
+  X_l = as.matrix(X[, ind_l])
+  X_nl = as.matrix(X[, ind_nl])
+
+  mfit=gplsvcm_est(Y,X_l,X_nl,U,V,Tr,d,r,lambda, family, off, r_theta,eps)
+
+  if(dim(X_nl)[2] == 0){
+    n=length(mfit$y); coef=mfit$coefficients;
+    mfit$Y=Y; mfit$X_l=X_l; mfit$X_nl=as.matrix(rep(0,n)); mfit$U=U; mfit$beta_hat=as.matrix(coef);
+    mfit$alpha_hat=as.matrix(rep(0,n));
+  }
+
+  if(dim(X_l)[2] == 0){
+    n=length(mfit$Y);
+    mfit$X_l=as.matrix(rep(0,n)); mfit$beta_hat=c(0);
+  }
+  mfit$ind_l=ind_l; mfit$ind_nl=ind_nl;
+  mfit$V = V; mfit$Tr = Tr; mfit$d = d; mfit$r = r;
+  mfit$family = family;  mfit$call = this_call;
+  mfit$lambda=lambda; mfit$r_theta=r_theta; mfit$off=off; mfit$eps=eps;
+  class(mfit) = "gplsvcm"
+  return(mfit)
+}
